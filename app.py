@@ -25,7 +25,7 @@ from langgraph_mcp_tool_rag_backend import (
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, AIMessageChunk
 from agent import VECTORSTORE_DIR # Import the directory where vectorstores are saved
 
-MAX_AI_SEARCHES = 5
+MAX_AI_SEARCHES = 10
 
 # ---------------- Cookie Setup ----------------
 cookies = EncryptedCookieManager(
