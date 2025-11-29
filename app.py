@@ -375,11 +375,14 @@ if user_input:
 
         st.session_state['message_history'].append({'role':'assistant','content':ai_message})
         
+        thread_id_str = str(st.session_state['thread_id'])
+        thread_name = st.session_state['thread_names'].get(thread_id_str, "New Conversation")
+
         run_async(store_conversation(
-            str(st.session_state['thread_id']),
+            thread_id_str,
             current_username,
             st.session_state['message_history'],
-            st.session_state['thread_names'][str(st.session_state['thread_id'])]
+            thread_name
         ))
         
         st.rerun()
