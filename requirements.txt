@@ -100,7 +100,6 @@ xxhash==3.5.0
 zstandard==0.23.0
 langchain-community
 langchain-mcp-adapters
-pywin32
 duckduckgo-search
 faiss-cpu
 pypdf
