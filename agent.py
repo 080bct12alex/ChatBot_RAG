@@ -91,6 +91,10 @@ search_tool = DuckDuckGoSearchRun(region="us-en")
 
 @tool
 def calculator(first_num: float, second_num: float, operation: str) -> dict:
+    """
+    Perform a basic arithmetic operation on two numbers.
+    Supported operations: add, sub, mul, div
+    """
     try:
         if operation == "add":
             result = first_num + second_num
@@ -110,12 +114,20 @@ def calculator(first_num: float, second_num: float, operation: str) -> dict:
 
 @tool
 def get_stock_price(symbol: str) -> dict:
+    """
+    Fetch latest stock price for a given symbol (e.g. 'AAPL', 'TSLA')
+    using Alpha Vantage API.
+    """
     url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={symbol}&apikey=8S6VBWTFZH9U6HDA"
     r = requests.get(url)
     return r.json()
 
 @tool
 async def rag_tool(query: str, thread_id: str = None) -> dict:
+    """
+    Retrieve relevant information from the uploaded PDF for this chat thread.
+    Always include the thread_id when calling this tool.
+    """
     if not thread_id:
         return {"error": f"rag_tool was called without a thread_id. Query: {query}", "query": query}
 
