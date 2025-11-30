@@ -25,7 +25,7 @@ from database import add_document, get_document_for_thread
 
 load_dotenv()
 
-# Dedicated async loop for backend tasks
+# ---------------- Async Loop Setup ----------------
 _ASYNC_LOOP = asyncio.new_event_loop()
 _ASYNC_THREAD = threading.Thread(target=_ASYNC_LOOP.run_forever, daemon=True)
 _ASYNC_THREAD.start()
@@ -40,22 +40,16 @@ def submit_async_task(coro):
     """Schedule a coroutine on the backend event loop."""
     return _submit_async(coro)
 
-# ---------------- LLM Setup ----------------
+# ---------------- LLM & Embeddings ----------------
 llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite", temperature=0.7)
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
-
-# ---------------- Vector Store ----------------
+# ---------------- Vector Store Directory ----------------
 VECTORSTORE_DIR = "vectorstores"
-if not os.path.exists(VECTORSTORE_DIR):
-    os.makedirs(VECTORSTORE_DIR)
+os.makedirs(VECTORSTORE_DIR, exist_ok=True)
 
 # ---------------- PDF Ingestion ----------------
 async def ingest_pdf(conn: aiosqlite.Connection, file_bytes: bytes, thread_id: str, filename: str) -> dict:
-    """
-    Build a FAISS retriever for the uploaded PDF and store it for the thread.
-    Returns a summary dict that can be surfaced in the UI.
-    """
     if not file_bytes:
         raise ValueError("No bytes received for ingestion.")
 
@@ -74,7 +68,6 @@ async def ingest_pdf(conn: aiosqlite.Connection, file_bytes: bytes, thread_id: s
 
         vector_store = await asyncio.to_thread(FAISS.from_documents, chunks, embeddings)
         
-        # Save the vector store
         vectorstore_path = os.path.join(VECTORSTORE_DIR, f"{thread_id}.faiss")
         await asyncio.to_thread(vector_store.save_local, vectorstore_path)
 
@@ -84,7 +77,6 @@ async def ingest_pdf(conn: aiosqlite.Connection, file_bytes: bytes, thread_id: s
             "chunks": len(chunks),
         }
 
-        # Store metadata in the database
         await add_document(conn, thread_id, filename, vectorstore_path, doc_info)
         
         return doc_info
@@ -99,11 +91,6 @@ search_tool = DuckDuckGoSearchRun(region="us-en")
 
 @tool
 def calculator(first_num: float, second_num: float, operation: str) -> dict:
-    """
-    Perform a basic arithmetic operation on two numbers.
-    Supported operations: add, sub, mul, div
-    """
-    # ... (implementation remains the same)
     try:
         if operation == "add":
             result = first_num + second_num
@@ -117,48 +104,30 @@ def calculator(first_num: float, second_num: float, operation: str) -> dict:
             result = first_num / second_num
         else:
             return {"error": f"Unsupported operation '{operation}'"}
-        
         return {"first_num": first_num, "second_num": second_num, "operation": operation, "result": result}
     except Exception as e:
         return {"error": str(e)}
 
 @tool
 def get_stock_price(symbol: str) -> dict:
-    """
-    Fetch latest stock price for a given symbol (e.g. 'AAPL', 'TSLA') 
-    using Alpha Vantage with API key in the URL.
-    """
     url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={symbol}&apikey=8S6VBWTFZH9U6HDA"
     r = requests.get(url)
     return r.json()
 
 @tool
 async def rag_tool(query: str, thread_id: str = None) -> dict:
-    """
-    Retrieve relevant information from the uploaded PDF for this chat thread.
-    Always include the thread_id when calling this tool.
-    """
     if not thread_id:
-        return {
-            "error": f"rag_tool was called without a thread_id. Query: {query}",
-            "query": query,
-        }
+        return {"error": f"rag_tool was called without a thread_id. Query: {query}", "query": query}
 
     async with aiosqlite.connect(database="chatbot.db") as conn:
         doc_info = await get_document_for_thread(conn, thread_id)
-    
+
     if doc_info is None:
-        return {
-            "error": f"No document indexed for this chat. (Thread ID: {thread_id}). Upload a PDF first.",
-            "query": query,
-        }
-    
+        return {"error": f"No document indexed for this chat. Upload a PDF first. (Thread ID: {thread_id})", "query": query}
+
     vectorstore_path = os.path.join(VECTORSTORE_DIR, f"{thread_id}.faiss")
     if not os.path.exists(vectorstore_path):
-        return {
-            "error": f"Vector store not found for this thread. (Thread ID: {thread_id})",
-            "query": query,
-        }
+        return {"error": f"Vector store not found for this thread. (Thread ID: {thread_id})", "query": query}
 
     try:
         faiss_index = await asyncio.to_thread(
@@ -167,43 +136,27 @@ async def rag_tool(query: str, thread_id: str = None) -> dict:
             embeddings=embeddings,
             allow_dangerous_deserialization=True
         )
-        
         retriever = faiss_index.as_retriever(search_type="similarity", search_kwargs={"k": 4})
         result = await retriever.ainvoke(query)
-        
+
         context = [doc.page_content for doc in result]
         metadata = [doc.metadata for doc in result]
 
-        return {
-            "query": query,
-            "context": context,
-            "metadata": metadata,
-            "source_file": doc_info.get("filename"),
-        }
+        return {"query": query, "context": context, "metadata": metadata, "source_file": doc_info.get("filename")}
     except Exception as e:
         return {"error": str(e), "query": query}
 
-
-# --- MCP Client Setup ---
-client = MultiServerMCPClient(
-    {
-        "expense": {
-            "transport": "streamable_http",
-            "url": "https://alexmcp.fastmcp.app/mcp"
-        }
-    }
-)
+# ---------------- MCP Client Setup ----------------
+client = MultiServerMCPClient({"expense": {"transport": "streamable_http", "url": "https://alexmcp.fastmcp.app/mcp"}})
 
 def load_mcp_tools() -> list[BaseTool]:
     try:
-        mcp_tools = run_async(client.get_tools())
-        return mcp_tools
+        return run_async(client.get_tools())
     except Exception as e:
         print(f"Failed to load MCP tools: {e}")
         return []
 
 mcp_tools = load_mcp_tools()
-
 tools = [search_tool, get_stock_price, calculator, rag_tool, *mcp_tools]
 llm_with_tools = llm.bind_tools(tools) if tools else llm
 
@@ -215,19 +168,36 @@ class ChatState(TypedDict):
 async def chat_node(state: ChatState, config=None):
     """LLM node that may answer or request a tool call."""
     messages = state["messages"]
-    
-    response = await llm_with_tools.ainvoke(messages)
 
-    if hasattr(response, "tool_calls") and response.tool_calls:
-        thread_id = config.get("configurable", {}).get("thread_id")
-        if thread_id:
-            for call in response.tool_calls:
-                if call.get('name') == 'rag_tool':
-                    if call.get('args') is None:
-                        call['args'] = {}
-                    if 'thread_id' not in call['args'] or not call['args']['thread_id']:
-                        call['args']['thread_id'] = thread_id
-    
+    # Extract thread_id from config (if any)
+    thread_id = config.get("configurable", {}).get("thread_id") if config else None
+
+    # Create system_message dynamically using the current thread_id
+    system_message = SystemMessage(
+        content=(
+            "You are a helpful assistant. For questions about the uploaded PDF, call "
+            "the `rag_tool` and include the thread_id "
+            f"`{thread_id}`. You can also use the web search, stock price, and "
+            "calculator tools when helpful. If no document is available, ask the user "
+            "to upload a PDF."
+        )
+    )
+
+    # Prepend system_message to messages
+    all_messages = [system_message] + messages
+
+    # Call the LLM with tools
+    response = await llm_with_tools.ainvoke(all_messages)
+
+    # Ensure rag_tool calls include the thread_id
+    if hasattr(response, "tool_calls") and response.tool_calls and thread_id:
+        for call in response.tool_calls:
+            if call.get('name') == 'rag_tool':
+                if call.get('args') is None:
+                    call['args'] = {}
+                if 'thread_id' not in call['args'] or not call['args']['thread_id']:
+                    call['args']['thread_id'] = thread_id
+
     return {"messages": [response]}
 
 tool_node = ToolNode(tools) if tools else None
