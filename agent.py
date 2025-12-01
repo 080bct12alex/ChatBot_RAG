@@ -41,7 +41,7 @@ def submit_async_task(coro):
     return _submit_async(coro)
 
 # ---------------- LLM & Embeddings ----------------
-llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite", temperature=0.7)
+llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.7)
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
 # ---------------- Vector Store Directory ----------------
